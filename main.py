@@ -1,118 +1,122 @@
-import os
 import re
 from collections import Counter
 from pathlib import Path
 
-# You may need to install the networkx library: pip install networkx
-import networkx as nx
+from Localization import HEADER, FOOTER, print_node, print_edge
+from Node import Node
 
-# --- Configuration ---
-# Use your actual folder paths here
-FOLDERS = [rf'C:\Games\Victoria-3\game\gui', ]# rf'C:\Games\Victoria-3\game\localization\english']
+# --- Configuration ---f
+FOLDERS = [rf'C:\Games\Victoria-3\game\gui']
 TARGET_EXTENSIONS = ('.gui', '.yml')
 OUTPUT_FILENAME = 'output_counts.txt'
-GRAPHML_FILENAME = 'output_graph' # Filename for the graph output
+GRAPHML_FILENAME = 'output_graph'
 WRITE_TO_TEXT_FILE = True
-LIMIT = 250  # Increased limit for a more interesting graph
-ANALYSIS_MODE = 'pairs' # -- TOGGLE: Change this to 'units' or 'pairs' to switch analysis type
+ANALYSIS_MODE = 'pairs' # -- TOGGLE: 'units' or 'pairs'
+edge_style = 'percentile' # -- TOGGLE: 'percent' / 'percentile'
+LIMIT = 100  # Increased limit for a more interesting graph
 
-
-def create_graphml_from_pairs(pairs_data, max_weight, limit, filename):
+def prepare_graphml_from_pairs(pairs_data, max_weight, limit, filename):
     """
     Creates a directed graph from pairs data and saves it as a GraphML file.
-
-    Args:
-        pairs_data (list): A list of ((part1, part2), count) tuples.
-        max_weight (int): The highest count found, for normalization.
-        limit (int): The number of top pairs to include in the graph.
-        filename (str): The path to save the .graphml file.
     """
-    print(f"Generating GraphML file at '{filename}'...")
 
-    # Create a new directed graph
-    G = nx.DiGraph()
+    # --- Step 1: Get the top pairs and find all unique node names ---
+    # pairs_data.sort(key=lambda x: x[1], reverse=True)
+    top_pairs = pairs_data
+    if limit > 0:
+        top_pairs = top_pairs[:limit]
 
-    # Sort pairs_data by count in descending order
-    # Get top pairs for visualization
 
-    pairs_data.sort(key=lambda x: x[1], reverse=True)
-    top_pairs = pairs_data[:limit]
-    
     if not top_pairs:
         print("No pairs to generate a graph from.")
         return
 
-    # Get the unique nodes from the top pairs
-    nodes = set()
-    for (source, target), count in top_pairs:
-        nodes.add(source)
-        nodes.add(target)
-    
-    # Add nodes with a 'label' attribute
-    for node_name in nodes:
-        G.add_node(node_name, label=node_name)
+    # Get the unique node names from the top pairs
+    unique_node_names = set()
+    for (source_name, target_name), count in top_pairs:
+        unique_node_names.add(source_name)
+        unique_node_names.add(target_name)
+    unique_node_names = sorted(list(unique_node_names)) # sorted for consistent IDs
 
-    # Add edges with 'weight' and 'label' attributes
-    for (source, target), count in top_pairs:
-        # This is the same weight logic as your original code
-        normalized_weight = 10 * count / max_weight
-        if normalized_weight < 1:
-            normalized_weight = 1
-            
-        # Add an edge from source to target.
-        # We add 'weight' for analysis/thickness and 'label' for visualization.
-        G.add_edge(source, target, weight=normalized_weight, label=str(count))
+    # --- Step 2: Create Node objects and the name-to-ID mapping ---
+    nodes = []
+    name_to_id = {}
+    for i, name in enumerate(unique_node_names):
+        node_id = i
+        nodes.append(Node(id=node_id, name=name))
+        name_to_id[name] = node_id
 
-    # Write the graph to a file in GraphML format.
-    # The `infer_numeric_types=True` helps yEd recognize numbers.
-    nx.write_graphml(G, filename, infer_numeric_types=True)
-    print("GraphML file generation complete.")
+    # Header
+    file_contents = HEADER
+
+    # Add node definitions
+    for node in nodes:
+        file_contents += print_node(node)
+
+
+    # Add edge definitions
+    count_edges = len(top_pairs)
+    for i, ((source_name, target_name), count) in enumerate(top_pairs):
+        source_id = name_to_id[source_name]
+        target_id = name_to_id[target_name]
+
+        # Normalize weight for line thickness
+        if edge_style == 'percent':
+            normalized_weight = max(1.0, 10 * count / max_weight)
+        elif edge_style == 'percentile':
+            normalized_weight = max(1.0, 10 * (count_edges - i) / count_edges)
+        else:
+            raise 'Undefined edge style'
+
+        file_contents += print_edge(i, source_id, target_id, count, normalized_weight)
+
+
+    # Footer
+    file_contents += FOOTER
+
+    # Write the final string to a file
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(file_contents)
+
+    print(f"GraphML file generation complete: {filename}")
 
 
 def find_and_count(root_dirs, extensions, mode='units'):
     """
-    Recursively finds values within square brackets, then counts either the
-    individual parts or adjacent pairs of parts.
-    Returns the sorted counts and the maximum count found.
+    Finds and counts units or pairs from files.
+    This function now works exclusively with strings for simplicity and correctness.
     """
     counts = Counter()
     bracket_pattern = re.compile(r'\[(.*?)\]')
     identifier_pattern = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*')
-    max_weight = 0
 
     for folder in root_dirs:
-        print(f"Starting search in '{folder}' for files ending with {extensions}...")
+        print(f"Searching in '{folder}' for files ending with {extensions}...")
         p = Path(folder)
-        all_files = []
-        for filename in p.rglob('*.*'):
-            all_files.append(filename)
-        for filename in all_files:
-            if filename.suffix in extensions:
-                # if filename.endswith(extensions):
-                # file_path = os.path.join(dirpath, filename)
+        for file_path in p.rglob('*'):
+            if file_path.suffix in extensions:
                 try:
-                    with open(filename, 'r', encoding='utf-8-sig') as f:
+                    with open(file_path, 'r', encoding='utf-8-sig') as f:
                         content = f.read()
                         matches = bracket_pattern.findall(content)
                         for match in matches:
                             parts = identifier_pattern.findall(match)
                             if not parts:
                                 continue
+
                             if mode == 'units':
                                 counts.update(parts)
                             elif mode == 'pairs':
                                 for i in range(len(parts) - 1):
                                     pair = (parts[i], parts[i+1])
-                                    counts.update([pair])
+                                    counts.update([pair]) # update expects an iterable
                 except Exception as e:
                     print(f"Could not read file {file_path}: {e}")
-    
+
     if not counts:
         return [], 0
-    
-    # Find the max count among all items
-    max_weight = counts.most_common(1)[0][1]
 
+    max_weight = counts.most_common(1)[0][1]
     return counts.most_common(), max_weight
 
 # --- Main execution block ---
@@ -125,8 +129,9 @@ if __name__ == "__main__":
 
     if results:
         if WRITE_TO_TEXT_FILE:
-            print(f"\nAnalysis complete. Writing text results to '{OUTPUT_FILENAME}'...")
-            with open(OUTPUT_FILENAME, 'w', encoding='utf-8') as f:
+            output_path = Path(OUTPUT_FILENAME)
+            print(f"\nAnalysis complete. Writing text results to '{output_path}'...")
+            with open(output_path, 'w', encoding='utf-8') as f:
                 if ANALYSIS_MODE == 'units':
                     f.write("--- Found Units (Sorted by Count) ---\n")
                     for part, count in results:
@@ -135,9 +140,10 @@ if __name__ == "__main__":
                     f.write("--- Found Pairs (Sorted by Count) ---\n")
                     for (part1, part2), count in results:
                         f.write(f"{part1} -> {part2}: {count}\n")
-            print(f"\nFound a total of {len(results)} unique {ANALYSIS_MODE}.")
+            print(f"Found a total of {len(results)} unique {ANALYSIS_MODE}.")
 
         if ANALYSIS_MODE == 'pairs':
-            create_graphml_from_pairs(results, max_w, LIMIT, f"{GRAPHML_FILENAME}_{LIMIT}.graphml")
+            graph_filename = f"{GRAPHML_FILENAME}_{LIMIT}.graphml"
+            prepare_graphml_from_pairs(results, max_w, LIMIT, graph_filename)
     else:
         print("\nNo values found in square brackets.")
