@@ -4,6 +4,7 @@ from pathlib import Path
 
 from Localization import HEADER, FOOTER, print_node, print_edge
 from Node import Node
+from Parser import _extract_connections_from_string
 
 # --- Configuration ---f
 FOLDERS = [rf'C:\Games\Victoria-3\game\gui']
@@ -13,7 +14,7 @@ GRAPHML_FILENAME = 'output_graph'
 WRITE_TO_TEXT_FILE = True
 ANALYSIS_MODE = 'pairs' # -- TOGGLE: 'units' or 'pairs'
 edge_style = 'percentile' # -- TOGGLE: 'percent' / 'percentile'
-LIMIT = 100  # Increased limit for a more interesting graph
+LIMIT = 1000  # Increased limit for a more interesting graph
 
 def prepare_graphml_from_pairs(pairs_data, max_weight, limit, filename):
     """
@@ -56,6 +57,8 @@ def prepare_graphml_from_pairs(pairs_data, max_weight, limit, filename):
 
     # Add edge definitions
     count_edges = len(top_pairs)
+    prev_count = 0
+    normalized_weight = 1
     for i, ((source_name, target_name), count) in enumerate(top_pairs):
         source_id = name_to_id[source_name]
         target_id = name_to_id[target_name]
@@ -64,11 +67,13 @@ def prepare_graphml_from_pairs(pairs_data, max_weight, limit, filename):
         if edge_style == 'percent':
             normalized_weight = max(1.0, 10 * count / max_weight)
         elif edge_style == 'percentile':
-            normalized_weight = max(1.0, 10 * (count_edges - i) / count_edges)
+            if prev_count != count:
+                normalized_weight = max(1.0, 10 * (count_edges - i) / count_edges)
         else:
             raise 'Undefined edge style'
 
         file_contents += print_edge(i, source_id, target_id, count, normalized_weight)
+        count_prev = count
 
 
     # Footer
@@ -100,16 +105,18 @@ def find_and_count(root_dirs, extensions, mode='units'):
                         content = f.read()
                         matches = bracket_pattern.findall(content)
                         for match in matches:
-                            parts = identifier_pattern.findall(match)
-                            if not parts:
-                                continue
+                            connections = _extract_connections_from_string(match)
+                            if connections:
+                                counts.update(connections)
+                            # if not parts:
+                            #     continue
 
-                            if mode == 'units':
-                                counts.update(parts)
-                            elif mode == 'pairs':
-                                for i in range(len(parts) - 1):
-                                    pair = (parts[i], parts[i+1])
-                                    counts.update([pair]) # update expects an iterable
+                            # if mode == 'units':
+                            #     counts.update(parts)
+                            # elif mode == 'pairs':
+                            #     for i in range(len(parts) - 1):
+                            #         pair = (parts[i], parts[i+1])
+                            #         counts.update([pair]) # update expects an iterable
                 except Exception as e:
                     print(f"Could not read file {file_path}: {e}")
 

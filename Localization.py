@@ -22,7 +22,7 @@ FOOTER = """</graph>
     </graphml>"""
 
 def print_node(node):
-    width = int(7 + 6.5 * len(node.name))
+    width = int(10 + 6.25 * len(node.name))
     return f"""
                 <node id="n{node.id}">
                   <data key="d5"/>
